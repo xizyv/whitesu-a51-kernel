@@ -141,6 +141,7 @@ jobs:
           sed -i 's|^device.name2=.*|device.name2=a51xx|' anykernel.sh
           sed -i 's|^device.name3=.*|device.name3=|' anykernel.sh
           sed -i 's|^device.name4=.*|device.name4=|' anykernel.sh
+          sed -i 's|^block=.*|block=/dev/block/by-name/boot;|' anykernel.sh
           rm -rf .git .github
           zip -r9 ../WhiteSU-a51-$(date +%Y%m%d).zip . -x "*.md"
 
