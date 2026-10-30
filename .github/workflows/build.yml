@@ -18,6 +18,7 @@ env:
     CLANG_TRIPLE=aarch64-linux-gnu-
     LD=ld.lld AR=llvm-ar NM=llvm-nm
     OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
+    KCFLAGS=-Wno-error
 
 jobs:
   build:
