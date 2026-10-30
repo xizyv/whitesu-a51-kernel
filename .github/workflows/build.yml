@@ -1,0 +1,101 @@
+name: Build WhiteSU kernel (Galaxy A51)
+
+on:
+  workflow_dispatch:
+
+env:
+  KERNEL_REPO: https://github.com/Parbindar7/android_kernel_samsung_universal9611
+  KERNEL_BRANCH: lineage-24.0
+  DEFCONFIG: exynos9611-a51_defconfig
+  SETUP_URL: https://raw.githubusercontent.com/White-Society/WhiteSU/dev/kernel/setup.sh
+  SETUP_ARG: legacy
+  PATCH_URL: https://raw.githubusercontent.com/White-Society/kernel-patches/whitesu/syscall_hook/syscall_hook_4.14.patch
+  TOOLCHAIN_REPO: https://github.com/kdrag0n/proton-clang
+  MAKE_FLAGS: >-
+    -j4 O=out ARCH=arm64 CC=clang
+    CROSS_COMPILE=aarch64-linux-gnu-
+    CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+    CLANG_TRIPLE=aarch64-linux-gnu-
+    LD=ld.lld AR=llvm-ar NM=llvm-nm
+    OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
+            zip cpio lz4 git curl device-tree-compiler python3
+
+      - name: Clone kernel source
+        run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
+
+      - name: Clone toolchain (clang)
+        run: |
+          git clone --depth=1 "$TOOLCHAIN_REPO" toolchain
+          echo "$GITHUB_WORKSPACE/toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: Add WhiteSU to kernel tree
+        working-directory: kernel
+        run: curl -LSs "$SETUP_URL" | bash -s "$SETUP_ARG"
+
+      - name: Apply syscall hooks patch
+        working-directory: kernel
+        run: |
+          curl -LSsf "$PATCH_URL" -o ../hooks.patch
+          patch -p1 --dry-run < ../hooks.patch
+          patch -p1 --no-backup-if-mismatch < ../hooks.patch
+
+      - name: Configure kernel
+        working-directory: kernel
+        run: |
+          make $MAKE_FLAGS "$DEFCONFIG"
+          scripts/config --file out/.config \
+            -e KSU -e KSU_MANUAL_HOOK -e KSU_EXTRAS -d KSU_KPROBES_HOOK
+          make $MAKE_FLAGS olddefconfig
+          echo "--- KSU options in final .config ---"
+          grep "CONFIG_KSU" out/.config
+          for opt in KSU KSU_MANUAL_HOOK KSU_EXTRAS; do
+            grep -q "^CONFIG_${opt}=y" out/.config \
+              || { echo "::error::CONFIG_${opt} did not stick (missing in Kconfig?)"; exit 1; }
+          done
+
+      - name: Build kernel
+        working-directory: kernel
+        run: make $MAKE_FLAGS 2>&1 | tee ../build.log
+
+      - name: Package AnyKernel3 zip
+        run: |
+          IMG=kernel/out/arch/arm64/boot/Image
+          ls -lh kernel/out/arch/arm64/boot/
+          test -f "$IMG"
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          cp "$IMG" AnyKernel3/Image
+          cd AnyKernel3
+          sed -i 's|^kernel.string=.*|kernel.string=WhiteSU for Galaxy A51|' anykernel.sh
+          sed -i 's|^device.name1=.*|device.name1=a51|' anykernel.sh
+          sed -i 's|^device.name2=.*|device.name2=a51xx|' anykernel.sh
+          sed -i 's|^device.name3=.*|device.name3=|' anykernel.sh
+          sed -i 's|^device.name4=.*|device.name4=|' anykernel.sh
+          rm -rf .git .github
+          zip -r9 ../WhiteSU-a51-$(date +%Y%m%d).zip . -x "*.md"
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhiteSU-a51
+          path: WhiteSU-a51-*.zip
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
