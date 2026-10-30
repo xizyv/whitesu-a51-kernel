@@ -27,6 +27,8 @@ jobs:
         shell: bash
 
     steps:
+      - uses: actions/checkout@v4
+      
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -48,9 +50,8 @@ jobs:
       - name: Apply syscall hooks patch
         working-directory: kernel
         run: |
-          curl -LSsf "$PATCH_URL" -o ../hooks.patch
-          patch -p1 --dry-run < ../hooks.patch
-          patch -p1 --no-backup-if-mismatch < ../hooks.patch
+          patch -p1 --dry-run < ../patches/syscall_hook_4.14.patch
+          patch -p1 --no-backup-if-mismatch < ../patches/syscall_hook_4.14.patch
 
       - name: Configure kernel
         working-directory: kernel
