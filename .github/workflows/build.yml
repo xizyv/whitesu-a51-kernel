@@ -50,8 +50,63 @@ jobs:
       - name: Apply syscall hooks patch
         working-directory: kernel
         run: |
-          patch -p1 --dry-run < ../patches/syscall_hook_4.14.patch
-          patch -p1 --no-backup-if-mismatch < ../patches/syscall_hook_4.14.patch
+          patch -p1 --no-backup-if-mismatch -N < ../patches/syscall_hook_4.14.patch || true
+          find . -name '*.rej' -print -delete
+
+          python3 - <<'PY'
+          import re
+
+          GUARD = "#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_HOOK)\n"
+
+          # --- drivers/input/input.c ---
+          p = "drivers/input/input.c"
+          s = open(p, encoding="utf-8", errors="surrogateescape").read()
+          if "ksu_handle_input_handle_event" not in s:
+              decl = (GUARD +
+                  "extern bool ksu_input_hook __read_mostly;\n"
+                  "extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n"
+                  "#endif\n")
+              m = re.search(r"^void input_event\(", s, re.M)
+              assert m, "input_event not found"
+              s = s[:m.start()] + decl + s[m.start():]
+              m = re.search(r"^void input_event\([^)]*\)\s*\{\s*unsigned long flags;\n", s, re.M | re.S)
+              assert m, "input_event body not found"
+              call = ("\n" + GUARD +
+                  "\tif (unlikely(ksu_input_hook))\n"
+                  "\t\tksu_handle_input_handle_event(&type, &code, &value);\n"
+                  "#endif\n")
+              s = s[:m.end()] + call + s[m.end():]
+              open(p, "w", encoding="utf-8", errors="surrogateescape").write(s)
+
+          # --- fs/exec.c (native execve) ---
+          p = "fs/exec.c"
+          s = open(p, encoding="utf-8", errors="surrogateescape").read()
+          if "extern int ksu_handle_execve_sucompat" not in s:
+              decl = (GUARD +
+                  "__attribute__((hot))\n"
+                  "extern int ksu_handle_execve_sucompat(int *fd, const char __user **filename_user,\n"
+                  "\t\t\t       void *__never_use_argv, void *__never_use_envp,\n"
+                  "\t\t\t       int *__never_use_flags);\n"
+                  "#endif\n\n")
+              m = re.search(r"^SYSCALL_DEFINE3\(execve,", s, re.M)
+              assert m, "execve not found"
+              s = s[:m.start()] + decl + s[m.start():]
+              m = re.search(r"^SYSCALL_DEFINE3\(execve,[^{]*\{\n", s, re.M)
+              assert m, "execve body not found"
+              call = (GUARD +
+                  "\tksu_handle_execve_sucompat((int *)AT_FDCWD, &filename, NULL, NULL, NULL);\n"
+                  "#endif\n")
+              s = s[:m.end()] + call + s[m.end():]
+              open(p, "w", encoding="utf-8", errors="surrogateescape").write(s)
+          PY
+
+          for f in drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c; do
+            grep -q "ksu_handle" "$f" || { echo "::error::hook missing in $f"; exit 1; }
+          done
+          [ "$(grep -c ksu_handle_execve_sucompat fs/exec.c)" -ge 3 ] \
+            || { echo "::error::exec.c hooks incomplete"; exit 1; }
+          echo "All hooks in place"
+
 
       - name: Configure kernel
         working-directory: kernel
