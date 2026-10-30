@@ -58,6 +58,7 @@ jobs:
           make $MAKE_FLAGS "$DEFCONFIG"
           scripts/config --file out/.config \
             -e KSU -e KSU_MANUAL_HOOK -e KSU_EXTRAS -d KSU_KPROBES_HOOK
+          scripts/config --file out/.config --set-str LOCALVERSION "-WKP-AOSP"
           make $MAKE_FLAGS olddefconfig
           echo "--- KSU options in final .config ---"
           grep "CONFIG_KSU" out/.config
@@ -78,7 +79,7 @@ jobs:
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
           cp "$IMG" AnyKernel3/Image
           cd AnyKernel3
-          sed -i 's|^kernel.string=.*|kernel.string=WhiteSU for Galaxy A51|' anykernel.sh
+          sed -i 's|^kernel.string=.*|kernel.string=White Kernel Project for a51|' anykernel.sh
           sed -i 's|^device.name1=.*|device.name1=a51|' anykernel.sh
           sed -i 's|^device.name2=.*|device.name2=a51xx|' anykernel.sh
           sed -i 's|^device.name3=.*|device.name3=|' anykernel.sh
